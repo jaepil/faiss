@@ -36,7 +36,12 @@ runs:
 
         # install base packages for ARM64
         if [ "${{ runner.arch }}" = "ARM64" ]; then
-          conda install -y -q -c conda-forge openblas gxx_linux-aarch64 sysroot_linux-aarch64
+          # installing libmamba-solver is necessary for openblas=*=*openmp*
+          conda install --solver=classic conda-forge::conda-libmamba-solver conda-forge::libmamba conda-forge::libmambapy conda-forge::libarchive
+
+          # installing openblas that was compiled with USE_OPENMP=1.
+          # Context: https://github.com/facebookresearch/faiss/wiki/Troubleshooting#surprising-faiss-openmp-and-openblas-interaction
+          conda install -y -q -c conda-forge openblas=*=*openmp* gxx_linux-aarch64 sysroot_linux-aarch64
         fi
 
         # install base packages for X86_64
@@ -46,13 +51,14 @@ runs:
           conda install -y -q mkl=2023 mkl-devel=2023
         fi
 
-        # install CUDA packages
-        if [ "${{ inputs.gpu }}" = "ON" ] && [ "${{ inputs.raft }}" = "OFF" ]; then
+        # no CUDA needed for ROCm so skip this
+        if [ "${{ inputs.rocm }}" = "ON" ]; then
+          :
+        # regular CUDA for GPU builds
+        elif [ "${{ inputs.gpu }}" = "ON" ] && [ "${{ inputs.raft }}" = "OFF" ]; then
           conda install -y -q cuda-toolkit -c "nvidia/label/cuda-12.4.0"
-        fi
-
-        # install RAFT packages
-        if [ "${{ inputs.raft }}" = "ON" ]; then
+        # and CUDA from RAFT channel for RAFT builds
+        elif [ "${{ inputs.raft }}" = "ON" ]; then
           conda install -y -q libraft cuda-version=12.4 cuda-toolkit -c rapidsai-nightly -c "nvidia/label/cuda-12.4.0" -c conda-forge
         fi
 
@@ -71,14 +77,14 @@ runs:
       shell: bash
       run: |
         # Update repos and install kmod, wget, gpg
-        sudo apt-get update
-        sudo apt-get install -y kmod wget gpg
+        sudo apt-get -qq update >/dev/null
+        sudo apt-get -qq install -y kmod wget gpg >/dev/null
 
         # Get UBUNTU version name
         UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
 
         # Set ROCm version
-        ROCM_VERSION="6.1.1"
+        ROCM_VERSION="6.2"
 
         # Download, prepare, and install the package signing key
         mkdir --parents --mode=0755 /etc/apt/keyrings
@@ -88,15 +94,17 @@ runs:
         wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
         rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
         echo "deb [arch=amd64] ${rocm_baseurl} ${UBUNTU_VERSION_NAME} main" | sudo tee /etc/apt/sources.list.d/rocm.list
-        sudo apt-get update --allow-insecure-repositories
-        sudo apt-get install -y --allow-unauthenticated \
-            "rocm-dev${ROCM_VERSION}" "rocm-utils${ROCM_VERSION}" "rocm-libs${ROCM_VERSION}"
+        sudo apt-get -qq update --allow-insecure-repositories >/dev/null
+        sudo apt-get -qq install -y --allow-unauthenticated \
+            "rocm-dev${ROCM_VERSION}" "rocm-utils${ROCM_VERSION}" \
+            "rocm-libs${ROCM_VERSION}" >/dev/null
 
         # Fake presence of MI200-class accelerators
         echo "gfx90a" | sudo tee /opt/rocm/bin/target.lst
 
         # Cleanup
-        sudo apt-get autoclean && sudo apt-get clean
+        sudo apt-get -qq autoclean >/dev/null
+        sudo apt-get -qq clean >/dev/null
         sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
     - name: ROCm - Hipify
       if: inputs.rocm == 'ON'
@@ -131,7 +139,6 @@ runs:
               .
         make -k -C build -j$(nproc)
     - name: C++ tests
-      if: inputs.rocm == 'OFF'
       shell: bash
       run: |
         export GTEST_OUTPUT="xml:$(realpath .)/test-results/googletest/"
@@ -168,6 +175,7 @@ runs:
         FAISS_DISABLE_CPU_FEATURES=AVX2 LD_DEBUG=libs $CONDA/bin/python -c "import faiss" 2>&1 | grep faiss.so
         LD_DEBUG=libs $CONDA/bin/python -c "import faiss" 2>&1 | grep faiss_avx2.so
     - name: Upload test results
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: test-results-arch=${{ runner.arch }}-opt=${{ inputs.opt_level }}-gpu=${{ inputs.gpu }}-raft=${{ inputs.raft }}-rocm=${{ inputs.rocm }}

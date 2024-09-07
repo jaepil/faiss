@@ -274,7 +274,10 @@ class IndexBase:
         D_gt=None,
     ):
         logger.info("knn_search: begin")
-        if search_parameters is not None and search_parameters["snap"] == 1:
+        if (
+            search_parameters is not None and
+            search_parameters.get("snap", 0) == 1
+        ):
             query_vectors = self.snap(query_vectors)
         filename = (
             self.get_knn_search_name(search_parameters, query_vectors, k)
@@ -322,7 +325,11 @@ class IndexBase:
             else:
                 xq = self.io.get_dataset(query_vectors)
                 (D, I), t, _ = timer("knn_search", lambda: index.search(xq, k))
-            if self.is_flat() or not hasattr(self, "database_vectors"):  # TODO
+            if (
+                self.is_flat() or
+                not hasattr(self, "database_vectors") or
+                (self.database_vectors is None)
+            ):  # TODO
                 R = D
             else:
                 xq = self.io.get_dataset(query_vectors)
@@ -352,20 +359,24 @@ class IndexBase:
             "factory": self.get_model_name(),
             "construction_params": self.get_construction_params(),
             "search_params": search_parameters,
-            "knn_intersection": knn_intersection_measure(
-                I,
-                I_gt,
-            )
-            if I_gt is not None
-            else None,
-            "distance_ratio": distance_ratio_measure(
-                I,
-                R,
-                D_gt,
-                self.metric_type,
-            )
-            if D_gt is not None
-            else None,
+            "knn_intersection": (
+                knn_intersection_measure(
+                    I,
+                    I_gt,
+                )
+                if I_gt is not None
+                else None
+            ),
+            "distance_ratio": (
+                distance_ratio_measure(
+                    I,
+                    R,
+                    D_gt,
+                    self.metric_type,
+                )
+                if D_gt is not None
+                else None
+            ),
         }
         logger.info("knn_search: end")
         return D, I, R, P, None
@@ -467,7 +478,10 @@ class IndexBase:
         radius: Optional[float] = None,
     ):
         logger.info("range_search: begin")
-        if search_parameters is not None and search_parameters.get("snap") == 1:
+        if (
+            search_parameters is not None and
+            search_parameters.get("snap", 0) == 1
+        ):
             query_vectors = self.snap(query_vectors)
         filename = (
             self.get_range_search_name(
@@ -607,6 +621,12 @@ class Index(IndexBase):
                 Index.cached_codec.popitem(last=False)
         return Index.cached_codec[codec_name]
 
+    def get_model(self):
+        return self.get_index()
+
+    def get_model_name(self):
+        return self.get_index_name()
+
     def get_codec_name(self) -> Optional[str]:
         return self.codec_name
 
@@ -709,6 +729,11 @@ class Index(IndexBase):
         def add_range_or_val(name, range):
             op.add_range(
                 name,
+                (
+                    [self.search_params[name]]
+                    if self.search_params and name in self.search_params
+                    else range
+                ),
                 [self.search_params[name]]
                 if self.search_params and name in self.search_params
                 else range,
@@ -786,12 +811,12 @@ class Index(IndexBase):
 # are used to wrap pre-trained Faiss indices (codecs)
 @dataclass
 class IndexFromCodec(Index):
-    path: Optional[str] = None
+    path: Optional[str] = None  # remote or local path to the codec
 
     def __post_init__(self):
         super().__post_init__()
-        if self.path is None:
-            raise ValueError("path is not set")
+        if self.path is None and self.codec_name is None:
+            raise ValueError("path or desc_name is not set")
 
     def get_quantizer(self):
         if not self.is_ivf():
@@ -808,16 +833,26 @@ class IndexFromCodec(Index):
         return quantizer
 
     def get_model_name(self):
-        return os.path.basename(self.path)
+        if self.path is not None:
+            return os.path.basename(self.path)
+        else:
+            return self.get_codec_name()
 
     def fetch_meta(self, dry_run=False):
         return None, None
 
     def fetch_codec(self):
+        if self.path is not None:
+            codec_filename = os.path.basename(self.path)
+            remote_path = os.path.dirname(self.path)
+        else:
+            codec_filename = self.get_codec_name() + "codec"
+            remote_path = None
+
         codec = self.io.read_index(
-            os.path.basename(self.path),
+            codec_filename,
             self.bucket,
-            os.path.dirname(self.path),
+            remote_path,
         )
         assert self.d == codec.d
         assert self.metric_type == codec.metric_type

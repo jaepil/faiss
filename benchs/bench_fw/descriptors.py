@@ -80,6 +80,11 @@ class DatasetDescriptor:
 
     embedding_column: Optional[str] = None
 
+    sampling_rate: Optional[float] = None
+
+    # sampling column for xdb
+    sampling_column: Optional[str] = None
+
     def __hash__(self):
         return hash(self.get_filename())
 
@@ -231,7 +236,7 @@ class CodecDescriptor(IndexBaseDescriptor):
             name = filename
         return name
 
-    def alias(self, benchmark_io : BenchmarkIO):
+    def alias(self, benchmark_io: BenchmarkIO):
         if hasattr(benchmark_io, "bucket"):
             return CodecDescriptor(desc_name=self.get_name(), bucket=benchmark_io.bucket, path=self.get_path(benchmark_io), d=self.d, metric=self.metric)
         return CodecDescriptor(desc_name=self.get_name(), d=self.d, metric=self.metric)
