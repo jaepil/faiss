@@ -778,7 +778,7 @@ int search_from_candidates(
             threshold = res.threshold;
 
             auto add_to_heap = [&](const size_t idx, const float dis) {
-                if (!sel || sel->is_member(idx)) {
+                if (!sel || sel->is_member(idx, dis)) {
                     if (dis < threshold) {
                         if (res.add_result(dis, idx)) {
                             threshold = res.threshold;
