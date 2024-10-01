@@ -122,6 +122,9 @@ struct IDSelectorTranslated : IDSelector {
     bool is_member(idx_t id) const override {
         return sel->is_member(id_map[id]);
     }
+    bool is_member(idx_t id, std::optional<float> d) const override {
+        return sel->is_member(id_map[id], d);
+    }
 };
 
 } // namespace faiss

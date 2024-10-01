@@ -157,6 +157,9 @@ void exhaustive_inner_product_seq(
                     continue;
                 }
                 float ip = fvec_inner_product(x_i, y_j, d);
+                if (!res.is_in_selection(j, ip)) {
+                    continue;
+                }
                 resi.add_result(ip, j);
             }
             resi.end();
@@ -189,6 +192,9 @@ void exhaustive_L2sqr_seq(
                     continue;
                 }
                 float disij = fvec_L2sqr(x_i, y_j, d);
+                if (!res.is_in_selection(j, disij)) {
+                    continue;
+                }
                 resi.add_result(disij, j);
             }
             resi.end();

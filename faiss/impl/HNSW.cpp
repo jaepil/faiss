@@ -600,7 +600,7 @@ int search_from_candidates(
         idx_t v1 = candidates.ids[i];
         float d = candidates.dis[i];
         FAISS_ASSERT(v1 >= 0);
-        if (!sel || sel->is_member(v1)) {
+        if (!sel || sel->is_member(v1, d)) {
             if (d < threshold) {
                 if (res.add_result(d, v1)) {
                     threshold = res.threshold;
@@ -629,6 +629,28 @@ int search_from_candidates(
 
         size_t begin, end;
         hnsw.neighbor_range(v0, level, &begin, &end);
+
+        // select a version, based on a flag
+        if (reference_version) {
+            // a reference version
+            for (size_t j = begin; j < end; j++) {
+                int v1 = hnsw.neighbors[j];
+                if (v1 < 0)
+                    break;
+                if (vt.get(v1)) {
+                    continue;
+                }
+                vt.set(v1);
+                ndis++;
+                float d = qdis(v1);
+                if (!sel || sel->is_member(v1, d)) {
+                    if (d < threshold) {
+                        if (res.add_result(d, v1)) {
+                            threshold = res.threshold;
+                            nres += 1;
+                        }
+                    }
+                }
 
         // a faster version: reference version in unit test test_hnsw.cpp
         // the following version processes 4 neighbors at a time
