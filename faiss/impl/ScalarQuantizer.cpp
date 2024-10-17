@@ -56,7 +56,7 @@ namespace faiss {
 #endif
 
 #if defined(__aarch64__)
-#if defined(__GNUC__) && __GNUC__ < 8
+#if !defined(__clang__) && defined(__GNUC__) && __GNUC__ < 8
 #warning \
         "Cannot enable NEON optimizations in scalar quantizer if the compiler is GCC<8"
 #else

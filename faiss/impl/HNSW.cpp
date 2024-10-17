@@ -630,28 +630,6 @@ int search_from_candidates(
         size_t begin, end;
         hnsw.neighbor_range(v0, level, &begin, &end);
 
-        // select a version, based on a flag
-        if (reference_version) {
-            // a reference version
-            for (size_t j = begin; j < end; j++) {
-                int v1 = hnsw.neighbors[j];
-                if (v1 < 0)
-                    break;
-                if (vt.get(v1)) {
-                    continue;
-                }
-                vt.set(v1);
-                ndis++;
-                float d = qdis(v1);
-                if (!sel || sel->is_member(v1, d)) {
-                    if (d < threshold) {
-                        if (res.add_result(d, v1)) {
-                            threshold = res.threshold;
-                            nres += 1;
-                        }
-                    }
-                }
-
         // a faster version: reference version in unit test test_hnsw.cpp
         // the following version processes 4 neighbors at a time
         size_t jmax = begin;
@@ -669,7 +647,7 @@ int search_from_candidates(
 
         threshold = res.threshold;
 
-            auto add_to_heap = [&](const size_t idx, const float dis) {
+        auto add_to_heap = [&](const size_t idx, const float dis) {
                 if (!sel || sel->is_member(idx, dis)) {
                     if (dis < threshold) {
                         if (res.add_result(dis, idx)) {

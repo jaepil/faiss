@@ -371,7 +371,7 @@ struct HeapHandler : ResultHandlerCompare<C, with_id_map> {
                 if (this->sel->is_member(real_idx, dis)) {
                     if (C::cmp(heap_dis[0], dis)) {
                         heap_replace_top<C>(
-                                k, heap_dis, heap_ids, dis_2, real_idx);
+                                k, heap_dis, heap_ids, dis, real_idx);
                     }
                 }
             }
