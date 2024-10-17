@@ -5,15 +5,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include <fmt/format.h>
+#include <faiss/perf_tests/utils.h>
 #include <gflags/gflags.h>
-#include <omp.h>
 #include <cstdio>
 #include <map>
 
 #include <benchmark/benchmark.h>
 #include <faiss/impl/ScalarQuantizer.h>
-#include <faiss/perf_tests/utils.h>
+#include <faiss/utils/distances.h>
 #include <faiss/utils/random.h>
 #include <faiss/utils/utils.h>
 
@@ -22,19 +21,17 @@ DEFINE_uint32(d, 128, "dimension");
 DEFINE_uint32(n, 2000, "dimension");
 DEFINE_uint32(iterations, 20, "iterations");
 
-static void bench_distance(
+static void bench_reconstruction_error(
         benchmark::State& state,
         ScalarQuantizer::QuantizerType type,
-        int n,
-        int d) {
+        int d,
+        int n) {
     std::vector<float> x(d * n);
 
     float_rand(x.data(), d * n, 12345);
 
     // make sure it's idempotent
     ScalarQuantizer sq(d, type);
-
-    omp_set_num_threads(1);
 
     sq.train(n, x.data());
 
@@ -45,20 +42,26 @@ static void bench_distance(
     std::vector<uint8_t> codes(code_size * n);
     sq.compute_codes(x.data(), codes.data(), n);
 
-    std::unique_ptr<ScalarQuantizer::SQDistanceComputer> dc(
-            sq.get_distance_computer());
-    dc->codes = codes.data();
-    dc->code_size = sq.code_size;
+    // decode
+    std::vector<float> x2(d * n);
+    sq.decode(codes.data(), x2.data(), n);
 
-    for (auto _ : state) {
-        float sum_dis = 0;
-        for (int i = 0; i < n; i++) {
-            dc->set_query(&x[i * d]);
-            for (int j = 0; j < n; j++) {
-                benchmark::DoNotOptimize(sum_dis += (*dc)(j));
-            }
-        }
+    state.counters["sql2_recons_error"] =
+            fvec_L2sqr(x.data(), x2.data(), n * d) / n;
+
+    // encode again
+    std::vector<uint8_t> codes2(code_size * n);
+    sq.compute_codes(x2.data(), codes2.data(), n);
+
+    size_t ndiff = 0;
+    for (size_t i = 0; i < codes.size(); i++) {
+        if (codes[i] != codes2[i])
+            ndiff++;
     }
+
+    state.counters["ndiff_for_idempotence"] = ndiff;
+
+    state.counters["code_size_two"] = codes.size();
 }
 
 int main(int argc, char** argv) {
@@ -72,13 +75,14 @@ int main(int argc, char** argv) {
 
     for (auto& [bench_name, quantizer_type] : benchs) {
         benchmark::RegisterBenchmark(
-                fmt::format("{}_{}d_{}n", bench_name, d, n).c_str(),
-                bench_distance,
+                bench_name.c_str(),
+                bench_reconstruction_error,
                 quantizer_type,
                 d,
                 n)
                 ->Iterations(iterations);
     }
+
     benchmark::RunSpecifiedBenchmarks();
     benchmark::Shutdown();
 }

@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include <fmt/format.h>
+#include <faiss/perf_tests/utils.h>
 #include <gflags/gflags.h>
 #include <omp.h>
 #include <cstdio>
@@ -13,8 +13,6 @@
 
 #include <benchmark/benchmark.h>
 #include <faiss/impl/ScalarQuantizer.h>
-#include <faiss/perf_tests/utils.h>
-#include <faiss/utils/distances.h>
 #include <faiss/utils/random.h>
 #include <faiss/utils/utils.h>
 
@@ -23,7 +21,7 @@ DEFINE_uint32(d, 128, "dimension");
 DEFINE_uint32(n, 2000, "dimension");
 DEFINE_uint32(iterations, 20, "iterations");
 
-static void bench_encode(
+static void bench_decode(
         benchmark::State& state,
         ScalarQuantizer::QuantizerType type,
         int d,
@@ -31,18 +29,25 @@ static void bench_encode(
     std::vector<float> x(d * n);
 
     float_rand(x.data(), d * n, 12345);
+
+    // make sure it's idempotent
     ScalarQuantizer sq(d, type);
 
     omp_set_num_threads(1);
-    size_t code_size = sq.code_size;
 
     sq.train(n, x.data());
+
+    size_t code_size = sq.code_size;
     state.counters["code_size"] = sq.code_size;
+
+    // encode
     std::vector<uint8_t> codes(code_size * n);
+    sq.compute_codes(x.data(), codes.data(), n);
+    std::vector<float> x2(d * n);
 
     for (auto _ : state) {
-        // encode
-        sq.compute_codes(x.data(), codes.data(), n);
+        // decode
+        sq.decode(codes.data(), x2.data(), n);
     }
 }
 
@@ -57,11 +62,7 @@ int main(int argc, char** argv) {
 
     for (auto& [bench_name, quantizer_type] : benchs) {
         benchmark::RegisterBenchmark(
-                fmt::format("{}_{}d_{}n", bench_name, d, n).c_str(),
-                bench_encode,
-                quantizer_type,
-                d,
-                n)
+                bench_name.c_str(), bench_decode, quantizer_type, d, n)
                 ->Iterations(iterations);
     }
 
