@@ -161,6 +161,10 @@ GpuMemoryReservation::~GpuMemoryReservation() {
 
 GpuResources::~GpuResources() = default;
 
+bool GpuResources::supportsBFloat16CurrentDevice() {
+    return supportsBFloat16(getCurrentDevice());
+}
+
 cublasHandle_t GpuResources::getBlasHandleCurrentDevice() {
     return getBlasHandle(getCurrentDevice());
 }
@@ -169,7 +173,7 @@ cudaStream_t GpuResources::getDefaultStreamCurrentDevice() {
     return getDefaultStream(getCurrentDevice());
 }
 
-#if defined USE_NVIDIA_RAFT
+#if defined USE_NVIDIA_CUVS
 raft::device_resources& GpuResources::getRaftHandleCurrentDevice() {
     return getRaftHandle(getCurrentDevice());
 }
