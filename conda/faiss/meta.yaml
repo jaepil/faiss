@@ -37,7 +37,7 @@ outputs:
     requirements:
       build:
         - {{ compiler('cxx') }}
-        - sysroot_linux-64 =2.17  # [linux64]
+        - sysroot_linux-64 =2.17 # [linux64]
         - llvm-openmp  # [osx]
         - cmake >=3.24.0
         - make =4.2 # [not win]
@@ -83,7 +83,7 @@ outputs:
     test:
       requires:
         - numpy >=1.19,<2
-        - scipy =1.14
+        - scipy
         - pytorch <2.5
       commands:
         - python -X faulthandler -m unittest discover -v -s tests/ -p "test_*"

@@ -97,7 +97,7 @@ outputs:
     test:
       requires:
         - numpy >=1.19,<2
-        - scipy =1.14
+        - scipy
         - pytorch <2.5
         - pytorch-cuda {{ cuda_constraints }}
       commands:
