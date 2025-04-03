@@ -36,9 +36,13 @@ struct MmappedFileMappingOwner::PImpl {
     void* ptr = nullptr;
     size_t ptr_size = 0;
 
+    static int wrapped_fclose(FILE* fp) {
+        return fclose(fp);
+    }
+
     PImpl(const std::string& filename) {
-        auto f = std::unique_ptr<FILE, decltype(&fclose)>(
-                fopen(filename.c_str(), "r"), &fclose);
+        auto f = std::unique_ptr<FILE, decltype(&wrapped_fclose)>(
+                fopen(filename.c_str(), "r"), &wrapped_fclose);
         FAISS_THROW_IF_NOT_FMT(
                 f.get(),
                 "could not open %s for reading: %s",
