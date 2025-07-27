@@ -73,8 +73,9 @@ IDSelectorArray::IDSelectorArray(size_t n, const idx_t* ids) : n(n), ids(ids) {}
 bool IDSelectorArray::is_member(idx_t id, std::optional<float> d) const {
     (void)d;
     for (idx_t i = 0; i < n; i++) {
-        if (ids[i] == id)
+        if (ids[i] == id) {
             return true;
+        }
     }
     return false;
 }
@@ -107,7 +108,7 @@ bool IDSelectorBatch::is_member(idx_t i, std::optional<float> d) const {
     if (!(bloom[im >> 3] & (1 << (im & 7)))) {
         return 0;
     }
-    return set.count(i);
+    return set.contains(i);
 }
 
 /***********************************************************************
