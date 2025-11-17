@@ -23,12 +23,14 @@ set(FAISS_SRC
   IndexIVF.cpp
   IndexIVFAdditiveQuantizer.cpp
   IndexIVFFlat.cpp
+  IndexIVFFlatPanorama.cpp
   IndexIVFPQ.cpp
   IndexIVFFastScan.cpp
   IndexIVFAdditiveQuantizerFastScan.cpp
   IndexIVFPQFastScan.cpp
   IndexIVFPQR.cpp
   IndexIVFRaBitQ.cpp
+  IndexIVFRaBitQFastScan.cpp
   IndexIVFSpectralHash.cpp
   IndexLSH.cpp
   IndexNNDescent.cpp
@@ -41,6 +43,7 @@ set(FAISS_SRC
   IndexPQFastScan.cpp
   IndexPreTransform.cpp
   IndexRaBitQ.cpp
+  IndexRaBitQFastScan.cpp
   IndexRefine.cpp
   IndexReplicas.cpp
   IndexRowwiseMinMax.cpp
@@ -63,6 +66,7 @@ set(FAISS_SRC
   impl/ProductQuantizer.cpp
   impl/AdditiveQuantizer.cpp
   impl/RaBitQuantizer.cpp
+  impl/RaBitQUtils.cpp
   impl/ResidualQuantizer.cpp
   impl/LocalSearchQuantizer.cpp
   impl/ProductAdditiveQuantizer.cpp
@@ -79,6 +83,7 @@ set(FAISS_SRC
   impl/residual_quantizer_encode_steps.cpp
   impl/zerocopy_io.cpp
   impl/NNDescent.cpp
+  impl/PanoramaStats.cpp
   invlists/BlockInvertedLists.cpp
   invlists/DirectMap.cpp
   invlists/InvertedLists.cpp
@@ -121,12 +126,14 @@ set(FAISS_HEADERS
   IndexIVFAdditiveQuantizer.h
   IndexIVFIndependentQuantizer.h
   IndexIVFFlat.h
+  IndexIVFFlatPanorama.h
   IndexIVFPQ.h
   IndexIVFFastScan.h
   IndexIVFAdditiveQuantizerFastScan.h
   IndexIVFPQFastScan.h
   IndexIVFPQR.h
   IndexIVFRaBitQ.h
+  IndexIVFRaBitQFastScan.h
   IndexIVFSpectralHash.h
   IndexLSH.h
   IndexNeuralNetCodec.h
@@ -141,6 +148,7 @@ set(FAISS_HEADERS
   IndexRefine.h
   IndexReplicas.h
   IndexRaBitQ.h
+  IndexRaBitQFastScan.h
   IndexRowwiseMinMax.h
   IndexScalarQuantizer.h
   IndexShards.h
@@ -163,14 +171,17 @@ set(FAISS_HEADERS
   impl/LocalSearchQuantizer.h
   impl/ProductAdditiveQuantizer.h
   impl/LookupTableScaler.h
+  impl/FastScanDistancePostProcessing.h
   impl/maybe_owned_vector.h
   impl/NNDescent.h
   impl/NSG.h
+  impl/PanoramaStats.h
   impl/PolysemousTraining.h
   impl/ProductQuantizer-inl.h
   impl/ProductQuantizer.h
   impl/Quantizer.h
   impl/RaBitQuantizer.h
+  impl/RaBitQUtils.h
   impl/ResidualQuantizer.h
   impl/ResultHandler.h
   impl/ScalarQuantizer.h

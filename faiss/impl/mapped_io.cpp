@@ -37,7 +37,7 @@ struct MmappedFileMappingOwner::PImpl {
         return fclose(fp);
     }
 
-    PImpl(const std::string& filename) {
+    explicit PImpl(const std::string& filename) {
         auto f = std::unique_ptr<FILE, decltype(&wrapped_fclose)>(
                 fopen(filename.c_str(), "r"), &wrapped_fclose);
         FAISS_THROW_IF_NOT_FMT(
@@ -68,7 +68,7 @@ struct MmappedFileMappingOwner::PImpl {
         ptr_size = filesize;
     }
 
-    PImpl(FILE* f) {
+    explicit PImpl(FILE* f) {
         // get the size
         struct stat s;
         int status = fstat(fileno(f), &s);

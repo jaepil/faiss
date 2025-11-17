@@ -8,31 +8,20 @@
 #include <faiss/impl/RaBitQuantizer.h>
 
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/impl/RaBitQUtils.h>
 #include <faiss/utils/distances.h>
 #include <faiss/utils/rabitq_simd.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <limits>
 #include <memory>
 #include <vector>
 
 namespace faiss {
 
-struct FactorsData {
-    // ||or - c||^2 - ((metric==IP) ? ||or||^2 : 0)
-    float or_minus_c_l2sqr = 0;
-    float dp_multiplier = 0;
-};
-
-struct QueryFactorsData {
-    float c1 = 0;
-    float c2 = 0;
-    float c34 = 0;
-
-    float qr_to_c_L2sqr = 0;
-    float qr_norm_L2sqr = 0;
-};
+// Import shared utilities from RaBitQUtils
+using rabitq_utils::FactorsData;
+using rabitq_utils::QueryFactorsData;
 
 static size_t get_code_size(const size_t d) {
     return (d + 7) / 8 + sizeof(FactorsData);
@@ -65,19 +54,9 @@ void RaBitQuantizer::compute_codes_core(
         return;
     }
 
-    // compute some helper constants
-    const float inv_d_sqrt = (d == 0) ? 1.0f : (1.0f / std::sqrt((float)d));
-
     // compute codes
 #pragma omp parallel for if (n > 1000)
     for (int64_t i = 0; i < n; i++) {
-        // ||or - c||^2
-        float norm_L2sqr = 0;
-        // ||or||^2, which is equal to ||P(or)||^2 and ||P^(-1)(or)||^2
-        float or_L2sqr = 0;
-        // dot product
-        float dp_oO = 0;
-
         // the code
         uint8_t* code = codes + i * code_size;
         FactorsData* fac = reinterpret_cast<FactorsData*>(code + (d + 7) / 8);
@@ -87,46 +66,25 @@ void RaBitQuantizer::compute_codes_core(
             memset(code, 0, code_size);
         }
 
+        const float* x_row = x + i * d;
+
+        // Use shared utilities for computing factors
+        *fac = rabitq_utils::compute_vector_factors(
+                x_row, d, centroid_in, metric_type);
+
+        // Pack bits into standard RaBitQ format
         for (size_t j = 0; j < d; j++) {
-            const float or_minus_c = x[i * d + j] -
-                    ((centroid_in == nullptr) ? 0 : centroid_in[j]);
-            norm_L2sqr += or_minus_c * or_minus_c;
-            or_L2sqr += x[i * d + j] * x[i * d + j];
-
-            const bool xb = (or_minus_c > 0);
-
-            dp_oO += xb ? or_minus_c : (-or_minus_c);
+            const float x_val = x_row[j];
+            const float centroid_val =
+                    (centroid_in == nullptr) ? 0.0f : centroid_in[j];
+            const float or_minus_c = x_val - centroid_val;
+            const bool xb = (or_minus_c > 0.0f);
 
             // store the output data
-            if (code != nullptr) {
-                if (xb) {
-                    // enable a particular bit
-                    code[j / 8] |= (1 << (j % 8));
-                }
+            if (code != nullptr && xb) {
+                rabitq_utils::set_bit_standard(code, j);
             }
         }
-
-        // compute factors
-
-        // compute the inverse norm
-        const float inv_norm_L2 =
-                (std::abs(norm_L2sqr) < std::numeric_limits<float>::epsilon())
-                ? 1.0f
-                : (1.0f / std::sqrt(norm_L2sqr));
-        dp_oO *= inv_norm_L2;
-        dp_oO *= inv_d_sqrt;
-
-        const float inv_dp_oO =
-                (std::abs(dp_oO) < std::numeric_limits<float>::epsilon())
-                ? 1.0f
-                : (1.0f / dp_oO);
-
-        fac->or_minus_c_l2sqr = norm_L2sqr;
-        if (metric_type == MetricType::METRIC_INNER_PRODUCT) {
-            fac->or_minus_c_l2sqr -= or_L2sqr;
-        }
-
-        fac->dp_multiplier = inv_dp_oO * std::sqrt(norm_L2sqr);
     }
 }
 
@@ -310,6 +268,7 @@ struct RaBitDistanceComputerQ : RaBitDistanceComputer {
 
     // the number of bits for SQ quantization of the query (qb > 0)
     uint8_t qb = 8;
+    bool centered = false;
     // the smallest value divisible by 8 that is not smaller than dim
     size_t popcount_aligned_dim = 0;
 
@@ -329,56 +288,34 @@ float RaBitDistanceComputerQ::distance_to_code(const uint8_t* code) {
              metric_type == MetricType::METRIC_INNER_PRODUCT));
 
     // split the code into parts
+    size_t size = (d + 7) / 8;
     const uint8_t* binary_data = code;
-    const FactorsData* fac =
-            reinterpret_cast<const FactorsData*>(code + (d + 7) / 8);
+    const FactorsData* fac = reinterpret_cast<const FactorsData*>(code + size);
 
-    // // this is the baseline code
-    // //
-    // // compute <q,o> using integers
-    // size_t dot_qo = 0;
-    // for (size_t i = 0; i < d; i++) {
-    //     // extract i-th bit
-    //     const uint8_t masker = (1 << (i % 8));
-    //     const uint8_t bit = ((binary_data[i / 8] & masker) == masker) ? 1 :
-    //     0;
-    //
-    //     // accumulate dp
-    //     dot_qo += bit * rotated_qq[i];
-    // }
-
-    // this is the scheme for popcount
-    const size_t di_8b = (d + 7) / 8;
-    const size_t di_64b = (di_8b / 8) * 8;
-
-    // Use the optimized popcount function from rabitq_simd.h
-    float dot_qo =
-            rabitq_dp_popcnt(rearranged_rotated_qq.data(), binary_data, d, qb);
-
-    // It was a willful decision (after the discussion) to not to pre-cache
-    //   the sum of all bits, just in order to reduce the overhead per vector.
-    uint64_t sum_q = 0;
-    {
-        // process 64-bit popcounts
-        for (size_t i = 0; i < di_64b; i += 8) {
-            const auto yv = *(const uint64_t*)(binary_data + i);
-            sum_q += __builtin_popcountll(yv);
-        }
-
-        // process leftovers
-        for (size_t i = di_64b; i < di_8b; i++) {
-            const auto yv = *(binary_data + i);
-            sum_q += __builtin_popcount(yv);
-        }
-    }
-
+    // this is ||or - c||^2 - (IP ? ||or||^2 : 0)
     float final_dot = 0;
-    // dot-product itself
-    final_dot += query_fac.c1 * dot_qo;
-    // normalizer coefficients
-    final_dot += query_fac.c2 * sum_q;
-    // normalizer coefficients
-    final_dot -= query_fac.c34;
+    if (centered) {
+        int64_t int_dot = ((1 << qb) - 1) * d;
+        int_dot -= 2 *
+                rabitq::bitwise_xor_dot_product(
+                           rearranged_rotated_qq.data(), binary_data, size, qb);
+        final_dot += int_dot * query_fac.int_dot_scale;
+    } else {
+        // See RaBitDistanceComputerNotQ::distance_to_code() for baseline code.
+        auto dot_qo = rabitq::bitwise_and_dot_product(
+                rearranged_rotated_qq.data(), binary_data, size, qb);
+
+        // It was a willful decision (after the discussion) to not to pre-cache
+        // the sum of all bits, just in order to reduce the overhead per vector.
+        // process 64-bit popcounts
+        auto sum_q = rabitq::popcount(binary_data, size);
+        // dot-product itself
+        final_dot += query_fac.c1 * dot_qo;
+        // normalizer coefficients
+        final_dot += query_fac.c2 * sum_q;
+        // normalizer coefficients
+        final_dot -= query_fac.c34;
+    }
 
     // this is ||or - c||^2 - (IP ? ||or||^2 : 0)
     const float or_c_l2sqr = fac->or_minus_c_l2sqr;
@@ -402,57 +339,23 @@ float RaBitDistanceComputerQ::distance_to_code(const uint8_t* code) {
     }
 }
 
+// Use shared constant from RaBitQUtils
+using rabitq_utils::Z_MAX_BY_QB;
+
 void RaBitDistanceComputerQ::set_query(const float* x) {
     FAISS_ASSERT(x != nullptr);
     FAISS_ASSERT(
             (metric_type == MetricType::METRIC_L2 ||
              metric_type == MetricType::METRIC_INNER_PRODUCT));
+    FAISS_THROW_IF_NOT(qb <= 8);
+    FAISS_THROW_IF_NOT(qb > 0);
 
-    // compute the distance from the query to the centroid
-    if (centroid != nullptr) {
-        query_fac.qr_to_c_L2sqr = fvec_L2sqr(x, centroid, d);
-    } else {
-        query_fac.qr_to_c_L2sqr = fvec_norm_L2sqr(x, d);
-    }
+    // Use shared utilities for core query factor computation
+    std::vector<float> rotated_q;
+    query_fac = rabitq_utils::compute_query_factors(
+            x, d, centroid, qb, centered, metric_type, rotated_q, rotated_qq);
 
-    // allocate space
-    rotated_qq.resize(d);
-
-    // rotate the query
-    std::vector<float> rotated_q(d);
-    for (size_t i = 0; i < d; i++) {
-        rotated_q[i] = x[i] - ((centroid == nullptr) ? 0 : centroid[i]);
-    }
-
-    // compute some numbers
-    const float inv_d = (d == 0) ? 1.0f : (1.0f / std::sqrt((float)d));
-
-    // quantize the query. compute min and max
-    float v_min = std::numeric_limits<float>::max();
-    float v_max = std::numeric_limits<float>::lowest();
-    for (size_t i = 0; i < d; i++) {
-        const float v_q = rotated_q[i];
-        v_min = std::min(v_min, v_q);
-        v_max = std::max(v_max, v_q);
-    }
-
-    const float pow_2_qb = 1 << qb;
-
-    const float delta = (v_max - v_min) / (pow_2_qb - 1);
-    const float inv_delta = 1.0f / delta;
-
-    size_t sum_qq = 0;
-    for (int32_t i = 0; i < d; i++) {
-        const float v_q = rotated_q[i];
-
-        // a default non-randomized SQ
-        const int v_qq = std::round((v_q - v_min) * inv_delta);
-
-        rotated_qq[i] = std::min(255, std::max(0, v_qq));
-        sum_qq += v_qq;
-    }
-
-    // rearrange the query vector
+    // Rearrange the query vector for SIMD operations (RaBitQuantizer-specific)
     popcount_aligned_dim = ((d + 7) / 8) * 8;
     size_t offset = (d + 7) / 8;
 
@@ -466,20 +369,12 @@ void RaBitDistanceComputerQ::set_query(const float* x) {
                     bit ? (1 << (idim % 8)) : 0;
         }
     }
-
-    query_fac.c1 = 2 * delta * inv_d;
-    query_fac.c2 = 2 * v_min * inv_d;
-    query_fac.c34 = inv_d * (delta * sum_qq + d * v_min);
-
-    if (metric_type == MetricType::METRIC_INNER_PRODUCT) {
-        // precompute if needed
-        query_fac.qr_norm_L2sqr = fvec_norm_L2sqr(x, d);
-    }
 }
 
 FlatCodesDistanceComputer* RaBitQuantizer::get_distance_computer(
         uint8_t qb,
-        const float* centroid_in) const {
+        const float* centroid_in,
+        bool centered) const {
     if (qb == 0) {
         auto dc = std::make_unique<RaBitDistanceComputerNotQ>();
         dc->metric_type = metric_type;
@@ -493,6 +388,7 @@ FlatCodesDistanceComputer* RaBitQuantizer::get_distance_computer(
         dc->d = d;
         dc->centroid = centroid_in;
         dc->qb = qb;
+        dc->centered = centered;
 
         return dc.release();
     }
