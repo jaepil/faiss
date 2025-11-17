@@ -293,8 +293,8 @@ struct SingleResultHandler : ResultHandlerCompare<C, with_id_map> {
                 int j = __builtin_ctz(lt_mask);
                 auto real_idx = this->adjust_id(b, j);
                 lt_mask -= 1 << j;
-                if (this->sel->is_member(real_idx)) {
-                    T d = d32tab[j];
+                T d = d32tab[j];
+                if (this->sel->is_member(real_idx, d)) {
                     if (C::cmp(idis[q], d)) {
                         idis[q] = d;
                         ids[q] = real_idx;
@@ -405,8 +405,8 @@ struct HeapHandler : ResultHandlerCompare<C, with_id_map> {
                 int j = __builtin_ctz(lt_mask);
                 auto real_idx = this->adjust_id(b, j);
                 lt_mask -= 1 << j;
-                if (this->sel->is_member(real_idx)) {
-                    T dis_2 = d32tab[j];
+                T dis_2 = d32tab[j];
+                if (this->sel->is_member(real_idx, dis_2)) {
                     if (C::cmp(heap_dis[0], dis_2)) {
                         heap_replace_top<C>(
                                 k, heap_dis, heap_ids, dis_2, real_idx);
@@ -523,9 +523,9 @@ struct ReservoirHandler : ResultHandlerCompare<C, with_id_map> {
                 int j = __builtin_ctz(lt_mask);
                 auto real_idx = this->adjust_id(b, j);
                 lt_mask -= 1 << j;
-                if (this->sel->is_member(real_idx)) {
-                    T dis_2 = d32tab[j];
-                    res.add(dis_2, real_idx);
+                T dis = d32tab[j];
+                if (this->sel->is_member(real_idx, dis)) {
+                    res.add(dis, real_idx);
                 }
             }
         } else {
@@ -646,8 +646,8 @@ struct RangeHandler : ResultHandlerCompare<C, with_id_map> {
                 lt_mask -= 1 << j;
 
                 auto real_idx = this->adjust_id(b, j);
-                if (this->sel->is_member(real_idx)) {
-                    T dis = d32tab[j];
+                T dis = d32tab[j];
+                if (this->sel->is_member(real_idx, dis)) {
                     n_per_query[q]++;
                     triplets.push_back({idx_t(q + q0), real_idx, dis});
                 }
